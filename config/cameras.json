@@ -1,16 +1,48 @@
 [
   {
     "camera_id": "CAM001",
-    "route": "I-40",
-    "region": "Durham",
-    "direction": "EB",
-    "status": "active"
+    "source": "mock",
+    "source_camera_id": "CAM001",
+    "source_id": "mock_CAM001",
+    "roadway": "I-40",
+    "direction": "Eastbound",
+    "latitude": 35.9940,
+    "longitude": -78.8986,
+    "location": "I-40 EB, Durham",
+    "status": "active",
+    "image_url": "http://127.0.0.1:8000/camera/CAM001",
+    "view_id": "CAM001_VIEW_1",
+    "view_description": "Mock roadside camera view",
+    "views": [
+      {
+        "Id": "CAM001_VIEW_1",
+        "Status": "enabled",
+        "Description": "Mock roadside camera view",
+        "Url": "http://127.0.0.1:8000/camera/CAM001"
+      }
+    ]
   },
   {
     "camera_id": "CAM002",
-    "route": "NC-147",
-    "region": "Durham",
-    "direction": "NB",
-    "status": "active"
+    "source": "mock",
+    "source_camera_id": "CAM002",
+    "source_id": "mock_CAM002",
+    "roadway": "NC-147",
+    "direction": "Northbound",
+    "latitude": 36.0059,
+    "longitude": -78.9390,
+    "location": "NC-147 NB, Durham",
+    "status": "active",
+    "image_url": "http://127.0.0.1:8000/camera/CAM002",
+    "view_id": "CAM002_VIEW_1",
+    "view_description": "Mock roadside camera view",
+    "views": [
+      {
+        "Id": "CAM002_VIEW_1",
+        "Status": "enabled",
+        "Description": "Mock roadside camera view",
+        "Url": "http://127.0.0.1:8000/camera/CAM002"
+      }
+    ]
   }
 ]

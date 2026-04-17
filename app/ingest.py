@@ -12,14 +12,14 @@ from app.utils import sha256_bytes, build_object_key
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = BASE_DIR / "config" / "cameras.json"
 
-MONGO_URI = "mongodb://127.0.0.1:27017/"
+import os
+
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017/")
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "127.0.0.1:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "traffic-raw")
 DB_NAME = "traffic_monitoring"
-
-MINIO_ENDPOINT = "127.0.0.1:9000"
-MINIO_ACCESS_KEY = "minioadmin"
-MINIO_SECRET_KEY = "minioadmin"
-MINIO_BUCKET = "traffic-raw"
-
 MOCK_API_BASE = "http://127.0.0.1:8000"
 
 TEST_TIMESTAMPS = [

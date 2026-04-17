@@ -1,23 +1,20 @@
+
 from datetime import datetime, UTC
 from io import BytesIO
-import time
+import os
 import requests
 from minio import Minio
 from pymongo import MongoClient
 
 from app.utils import sha256_bytes, build_object_key
 
-import os
-
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017/")
+DB_NAME = "traffic_monitoring"
+
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "127.0.0.1:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "traffic-raw")
-DB_NAME = "traffic_monitoring"
-# 511NY limits: 10 calls / 60 sec
-MAX_CALLS_PER_MIN = 10
-SLEEP_SECONDS = 7
 
 CAPTURE_TIME_CYCLE_MINUTES = 10
 
@@ -32,19 +29,18 @@ def ensure_bucket(client: Minio, bucket_name: str):
 def init_mongo():
     client = MongoClient(MONGO_URI)
     db = client[DB_NAME]
-
     db.raw_captures.create_index(
         [("camera_id", 1), ("capture_ts", 1)],
         unique=True
     )
     return db
 
-def fetch_active_cameras(db, limit=5):
+def fetch_active_cameras(db):
     return list(
         db.cameras.find(
             {"status": "active", "image_url": {"$ne": None}},
             {"_id": 0}
-        ).limit(limit)
+        )
     )
 
 def ingest_one(camera_doc, db, minio_client: Minio):
@@ -56,7 +52,7 @@ def ingest_one(camera_doc, db, minio_client: Minio):
     ts_str = capture_dt.strftime("%Y%m%d_%H%M")
 
     try:
-        response = requests.get(image_url, timeout=20)
+        response = requests.get(image_url, params={"ts": ts_str}, timeout=20)
         ingest_dt = datetime.now(UTC)
 
         if response.status_code != 200:
@@ -66,7 +62,7 @@ def ingest_one(camera_doc, db, minio_client: Minio):
                     "camera_id": camera_id,
                     "capture_ts": capture_dt,
                     "ingest_ts": ingest_dt,
-                    "source_url": image_url,
+                    "source_url": str(response.url),
                     "success": False,
                     "http_status": response.status_code,
                     "error_message": response.text[:500],
@@ -98,7 +94,7 @@ def ingest_one(camera_doc, db, minio_client: Minio):
                 "camera_id": camera_id,
                 "capture_ts": capture_dt,
                 "ingest_ts": ingest_dt,
-                "source_url": image_url,
+                "source_url": str(response.url),
                 "object_key": object_key,
                 "http_status": response.status_code,
                 "content_type": response.headers.get("Content-Type"),
@@ -110,6 +106,8 @@ def ingest_one(camera_doc, db, minio_client: Minio):
                 "direction": camera_doc.get("direction"),
                 "location": camera_doc.get("location"),
                 "view_id": camera_doc.get("view_id"),
+                "view_description": camera_doc.get("view_description"),
+                "source": camera_doc.get("source", "mock"),
             }},
             upsert=True,
         )
@@ -132,6 +130,8 @@ def ingest_one(camera_doc, db, minio_client: Minio):
                 "direction": camera_doc.get("direction"),
                 "location": camera_doc.get("location"),
                 "view_id": camera_doc.get("view_id"),
+                "view_description": camera_doc.get("view_description"),
+                "source": camera_doc.get("source", "mock"),
             }},
             upsert=True,
         )
@@ -148,11 +148,10 @@ def main():
     )
     ensure_bucket(minio_client, MINIO_BUCKET)
 
-    cameras = fetch_active_cameras(db, limit=5)
+    cameras = fetch_active_cameras(db)
 
     for cam in cameras:
         ingest_one(cam, db, minio_client)
-        time.sleep(SLEEP_SECONDS)
 
 if __name__ == "__main__":
     main()
