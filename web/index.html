@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Traffic Monitor</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      background: #1a1d27;
+      border-bottom: 1px solid #2a2d3a;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 16px; font-weight: 600; color: #fff; flex: 1; }
+    #api-url {
+      width: 280px;
+      padding: 6px 10px;
+      background: #0f1117;
+      border: 1px solid #3a3d4a;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-size: 13px;
+    }
+    #connect-btn {
+      padding: 6px 14px;
+      background: #3b82f6;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    #connect-btn:hover { background: #2563eb; }
+    #status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #4b5563;
+    }
+    #status-dot.ok { background: #22c55e; }
+    #status-dot.err { background: #ef4444; }
+
+    /* ── Layout ── */
+    main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Camera List ── */
+    #sidebar {
+      width: 300px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #2a2d3a;
+      overflow: hidden;
+    }
+    #sidebar-filters {
+      padding: 12px;
+      border-bottom: 1px solid #2a2d3a;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #search {
+      padding: 7px 10px;
+      background: #1a1d27;
+      border: 1px solid #3a3d4a;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-size: 13px;
+    }
+    .filter-row { display: flex; gap: 6px; }
+    .filter-row select {
+      flex: 1;
+      padding: 5px 8px;
+      background: #1a1d27;
+      border: 1px solid #3a3d4a;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-size: 12px;
+    }
+    #camera-count {
+      font-size: 11px;
+      color: #6b7280;
+      padding: 6px 12px;
+      border-bottom: 1px solid #2a2d3a;
+    }
+    #camera-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+    .cam-item {
+      padding: 10px 12px;
+      border-bottom: 1px solid #1e2130;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .cam-item:hover { background: #1e2130; }
+    .cam-item.active { background: #1e3a5f; border-left: 3px solid #3b82f6; }
+    .cam-item .cam-id { font-size: 12px; font-weight: 600; color: #93c5fd; }
+    .cam-item .cam-road { font-size: 12px; color: #9ca3af; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cam-item .cam-meta { display: flex; gap: 6px; margin-top: 4px; }
+    .badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-weight: 500;
+    }
+    .badge-active { background: #14532d; color: #86efac; }
+    .badge-inactive { background: #3f1515; color: #fca5a5; }
+    .badge-no_feed { background: #312e81; color: #a5b4fc; }
+    .badge-priority { background: #713f12; color: #fde047; }
+
+    /* ── Detail Panel ── */
+    #detail {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+    #placeholder {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #4b5563;
+      font-size: 14px;
+    }
+    #detail-content { display: none; }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 10px;
+    }
+
+    /* Camera header */
+    #cam-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    #cam-header .info { flex: 1; }
+    #cam-title { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+    #cam-subtitle { font-size: 13px; color: #6b7280; }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+    .meta-card {
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .meta-card .label { font-size: 11px; color: #6b7280; margin-bottom: 2px; }
+    .meta-card .value { font-size: 13px; font-weight: 500; color: #e0e0e0; }
+
+    /* Captures */
+    #captures-section { margin-bottom: 24px; }
+    #captures-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 12px;
+    }
+    .capture-card {
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .capture-img-wrap {
+      position: relative;
+      background: #0f1117;
+      height: 160px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .capture-img-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .capture-img-wrap .no-img { color: #4b5563; font-size: 12px; }
+    .capture-img-wrap .download-btn {
+      position: absolute;
+      top: 6px; right: 6px;
+      padding: 4px 8px;
+      background: rgba(0,0,0,0.7);
+      border: 1px solid #3a3d4a;
+      border-radius: 4px;
+      color: #e0e0e0;
+      font-size: 11px;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .capture-img-wrap .download-btn:hover { background: rgba(59,130,246,0.8); }
+    .capture-info { padding: 10px 12px; }
+    .capture-ts { font-size: 11px; color: #6b7280; margin-bottom: 8px; }
+
+    /* Features */
+    .feature-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .feature-label { font-size: 12px; color: #9ca3af; }
+    .feature-value { font-size: 12px; font-weight: 600; }
+    .congestion-free { color: #22c55e; }
+    .congestion-moderate { color: #facc15; }
+    .congestion-heavy { color: #f97316; }
+    .congestion-standstill { color: #ef4444; }
+
+    .density-bar-wrap {
+      height: 4px;
+      background: #2a2d3a;
+      border-radius: 2px;
+      margin-top: 4px;
+      margin-bottom: 8px;
+    }
+    .density-bar {
+      height: 4px;
+      border-radius: 2px;
+      background: #3b82f6;
+      transition: width 0.3s;
+    }
+
+    /* Load more */
+    #load-more-btn {
+      display: none;
+      margin: 16px auto 0;
+      padding: 8px 20px;
+      background: #1a1d27;
+      border: 1px solid #3a3d4a;
+      border-radius: 6px;
+      color: #9ca3af;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    #load-more-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🚦 Traffic Monitor</h1>
+  <input id="api-url" type="text" value="http://localhost:8000" placeholder="API endpoint" />
+  <button id="connect-btn" onclick="connect()">Connect</button>
+  <div id="status-dot" title="Not connected"></div>
+</header>
+
+<main>
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="sidebar-filters">
+      <input id="search" type="text" placeholder="Search by ID, roadway, county..." oninput="filterCameras()" />
+      <div class="filter-row">
+        <select id="filter-status" onchange="loadCameras()">
+          <option value="active">Active</option>
+          <option value="">All</option>
+          <option value="inactive">Inactive</option>
+          <option value="no_feed">No Feed</option>
+        </select>
+        <select id="filter-priority" onchange="loadCameras()">
+          <option value="">All cameras</option>
+          <option value="true">Priority only</option>
+        </select>
+      </div>
+    </div>
+    <div id="camera-count">Not connected</div>
+    <div id="camera-list"></div>
+  </div>
+
+  <!-- Detail -->
+  <div id="detail">
+    <div id="placeholder">← Select a camera to view details</div>
+    <div id="detail-content">
+      <div id="cam-header">
+        <div class="info">
+          <div id="cam-title"></div>
+          <div id="cam-subtitle"></div>
+        </div>
+      </div>
+      <div class="meta-grid" id="meta-grid"></div>
+
+      <div id="captures-section">
+        <div class="section-title">Recent Captures</div>
+        <div id="captures-grid"></div>
+        <button id="load-more-btn" onclick="loadMoreCaptures()">Load more</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+let API = "http://localhost:8000";
+let allCameras = [];
+let currentCameraId = null;
+let captureOffset = 0;
+const CAPTURE_PAGE = 6;
+
+// ── Connection ──────────────────────────────────────────────────────────────
+
+async function connect() {
+  API = document.getElementById("api-url").value.replace(/\/$/, "");
+  const dot = document.getElementById("status-dot");
+  try {
+    const r = await fetch(`${API}/cameras?limit=1`);
+    if (!r.ok) throw new Error();
+    dot.className = "ok";
+    dot.title = "Connected";
+    loadCameras();
+  } catch {
+    dot.className = "err";
+    dot.title = "Connection failed";
+    document.getElementById("camera-count").textContent = "Connection failed";
+  }
+}
+
+// ── Camera List ─────────────────────────────────────────────────────────────
+
+async function loadCameras() {
+  const status = document.getElementById("filter-status").value;
+  const priority = document.getElementById("filter-priority").value;
+
+  let url = `${API}/cameras?limit=200&offset=0`;
+  if (status) url += `&status=${status}`;
+  if (priority) url += `&priority=${priority}`;
+
+  try {
+    const r = await fetch(url);
+    const data = await r.json();
+    allCameras = data.data;
+    document.getElementById("camera-count").textContent = `${data.total} cameras total`;
+    renderCameraList(allCameras);
+  } catch {
+    document.getElementById("camera-count").textContent = "Failed to load";
+  }
+}
+
+function filterCameras() {
+  const q = document.getElementById("search").value.toLowerCase();
+  const filtered = q
+    ? allCameras.filter(c =>
+        c.camera_id.toLowerCase().includes(q) ||
+        (c.roadway || "").toLowerCase().includes(q) ||
+        (c.county || "").toLowerCase().includes(q)
+      )
+    : allCameras;
+  renderCameraList(filtered);
+}
+
+function renderCameraList(cameras) {
+  const list = document.getElementById("camera-list");
+  list.innerHTML = cameras.map(c => `
+    <div class="cam-item ${c.camera_id === currentCameraId ? 'active' : ''}"
+         onclick="selectCamera('${c.camera_id}')">
+      <div class="cam-id">${c.camera_id}</div>
+      <div class="cam-road">${c.roadway || c.location || '—'}</div>
+      <div class="cam-meta">
+        <span class="badge badge-${c.status}">
+          ${{ active: 'Active', inactive: 'Inactive', no_feed: 'No Feed' }[c.status] || c.status}
+        </span>
+        ${c.priority ? '<span class="badge badge-priority">Priority</span>' : ''}
+      </div>
+    </div>
+  `).join("");
+}
+
+// ── Camera Detail ────────────────────────────────────────────────────────────
+
+async function selectCamera(cameraId) {
+  currentCameraId = cameraId;
+  captureOffset = 0;
+
+  document.querySelectorAll(".cam-item").forEach(el => el.classList.remove("active"));
+  document.querySelectorAll(".cam-item").forEach(el => {
+    if (el.querySelector(".cam-id").textContent === cameraId)
+      el.classList.add("active");
+  });
+
+  document.getElementById("placeholder").style.display = "none";
+  document.getElementById("detail-content").style.display = "block";
+  document.getElementById("captures-grid").innerHTML = '<div style="color:#4b5563;font-size:13px">Loading...</div>';
+  document.getElementById("load-more-btn").style.display = "none";
+
+  const [camR, capR] = await Promise.all([
+    fetch(`${API}/cameras/${cameraId}`),
+    fetch(`${API}/cameras/${cameraId}/captures?limit=${CAPTURE_PAGE}&offset=0&success_only=true`),
+  ]);
+  const cam = await camR.json();
+  const capData = await capR.json();
+
+  renderCameraHeader(cam);
+  renderMetaGrid(cam);
+  await renderCaptures(capData.data, false);
+
+  if (capData.total > CAPTURE_PAGE) {
+    captureOffset = CAPTURE_PAGE;
+    const btn = document.getElementById("load-more-btn");
+    btn.style.display = "block";
+    btn.textContent = `Load more (showing ${CAPTURE_PAGE} of ${capData.total})`;
+  }
+}
+
+function renderCameraHeader(cam) {
+  document.getElementById("cam-title").textContent = cam.camera_id;
+  document.getElementById("cam-subtitle").textContent =
+    [cam.roadway, cam.direction, cam.location].filter(Boolean).join(" · ") || "—";
+}
+
+function renderMetaGrid(cam) {
+  const fields = [
+    ["Status",      { active: "🟢 Active", inactive: "🔴 Inactive", no_feed: "🔵 No Feed" }[cam.status] || cam.status],
+    ["Priority",    cam.priority ? "⭐ Yes" : "No"],
+    ["State",       cam.state || "—"],
+    ["County",      cam.county || "—"],
+    ["Region",      cam.region || "—"],
+    ["Country",     cam.country || "—"],
+    ["Coordinates", cam.latitude ? `${cam.latitude.toFixed(4)}, ${cam.longitude.toFixed(4)}` : "—"],
+    ["Geo Source",  cam.geo_quality || "—"],
+  ];
+  document.getElementById("meta-grid").innerHTML = fields.map(([label, value]) => `
+    <div class="meta-card">
+      <div class="label">${label}</div>
+      <div class="value">${value}</div>
+    </div>
+  `).join("");
+}
+
+// ── Captures ─────────────────────────────────────────────────────────────────
+
+async function renderCaptures(captures, append) {
+  const grid = document.getElementById("captures-grid");
+  if (!append) grid.innerHTML = "";
+
+  if (captures.length === 0 && !append) {
+    grid.innerHTML = '<div style="color:#4b5563;font-size:13px;padding:20px 0">No captures found</div>';
+    return;
+  }
+
+  const featureMap = {};
+  await Promise.all(captures.map(async cap => {
+    try {
+      const r = await fetch(
+        `${API}/cameras/${cap.camera_id}/features?limit=1` +
+        `&start=${encodeURIComponent(cap.capture_ts)}&end=${encodeURIComponent(cap.capture_ts)}`
+      );
+      const d = await r.json();
+      if (d.data.length > 0) featureMap[cap.capture_ts] = d.data[0];
+    } catch {}
+  }));
+
+  const html = captures.map(cap => {
+    const imgUrl = cap.object_key ? `${API}/images/${cap.object_key}` : null;
+    const ts = new Date(cap.capture_ts).toLocaleString("en-US");
+    const feat = featureMap[cap.capture_ts];
+
+    const featureHtml = feat ? `
+      <div class="feature-row">
+        <span class="feature-label">Vehicles</span>
+        <span class="feature-value">${feat.vehicle_count}</span>
+      </div>
+      <div class="density-bar-wrap">
+        <div class="density-bar" style="width:${(feat.traffic_density * 100).toFixed(0)}%"></div>
+      </div>
+      <div class="feature-row">
+        <span class="feature-label">Congestion</span>
+        <span class="feature-value congestion-${feat.congestion_level}">
+          ${congestionLabel(feat.congestion_level)}
+        </span>
+      </div>
+      <div class="feature-row">
+        <span class="feature-label">Scene change</span>
+        <span class="feature-value">${(feat.scene_change_score * 100).toFixed(0)}%</span>
+      </div>
+    ` : '<div style="color:#4b5563;font-size:12px">No feature data</div>';
+
+    return `
+      <div class="capture-card">
+        <div class="capture-img-wrap">
+          ${imgUrl
+            ? `<img src="${imgUrl}" alt="capture" loading="lazy" onerror="this.parentElement.innerHTML='<span class=no-img>Image unavailable</span>'" />
+               <a class="download-btn" href="${imgUrl}" download="capture_${cap.capture_ts}.jpg">⬇ Download</a>`
+            : '<span class="no-img">No image</span>'
+          }
+        </div>
+        <div class="capture-info">
+          <div class="capture-ts">${ts}</div>
+          ${featureHtml}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  grid.insertAdjacentHTML("beforeend", html);
+}
+
+async function loadMoreCaptures() {
+  const r = await fetch(
+    `${API}/cameras/${currentCameraId}/captures?limit=${CAPTURE_PAGE}&offset=${captureOffset}&success_only=true`
+  );
+  const data = await r.json();
+  await renderCaptures(data.data, true);
+  captureOffset += CAPTURE_PAGE;
+
+  const btn = document.getElementById("load-more-btn");
+  if (captureOffset >= data.total) {
+    btn.style.display = "none";
+  } else {
+    btn.textContent = `Load more (showing ${captureOffset} of ${data.total})`;
+  }
+}
+
+function congestionLabel(level) {
+  return { free: "Free", moderate: "Moderate", heavy: "Heavy", standstill: "Standstill" }[level] || level;
+}
+
+window.onload = connect;
+</script>
+</body>
+</html>

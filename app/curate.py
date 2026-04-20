@@ -11,11 +11,9 @@ MINIO_BUCKET = os.getenv("MINIO_BUCKET", "traffic-raw")
 DB_NAME = "traffic_monitoring"
 
 
-CAPTURE_TIME_CYCLE_MINUTES = 10
-
-def floor_ts_to_cycle(dt: datetime) -> datetime:
-    minute = (dt.minute // CAPTURE_TIME_CYCLE_MINUTES) * CAPTURE_TIME_CYCLE_MINUTES
-    return dt.replace(minute=minute, second=0, microsecond=0)
+NORMAL_CYCLE_MINUTES = 10
+PRIORITY_CYCLE_MINUTES = 2
+LOOKBACK_HOURS = 2
 
 def init_mongo():
     client = MongoClient(MONGO_URI,tz_aware=True)
@@ -27,8 +25,8 @@ def init_mongo():
     )
     return db
 
-def load_active_cameras_from_mongo(db):
-    return list(db.cameras.find({"status": "active"}, {"_id": 0}))
+def load_cameras_from_mongo(db):
+    return list(db.cameras.find({"status": {"$in": ["active", "no_feed"]}}, {"_id": 0}))
 
 def group_key(camera_id: str, capture_ts: datetime):
     return (
@@ -39,97 +37,133 @@ def group_key(camera_id: str, capture_ts: datetime):
 
 def build_expected_per_hour(cameras, start_ts: datetime, end_ts: datetime):
     expected_per_hour = defaultdict(int)
-    current = start_ts
-
-    while current <= end_ts:
-        for cam in cameras:
+    for cam in cameras:
+        cycle = PRIORITY_CYCLE_MINUTES if cam.get("priority") else NORMAL_CYCLE_MINUTES
+        current = start_ts
+        while current <= end_ts:
             expected_per_hour[group_key(cam["camera_id"], current)] += 1
-        current += timedelta(minutes=CAPTURE_TIME_CYCLE_MINUTES)
-
+            current += timedelta(minutes=cycle)
     return expected_per_hour
 
 def main():
     db = init_mongo()
-    cameras = load_active_cameras_from_mongo(db)
+    cameras = load_cameras_from_mongo(db)
 
     if not cameras:
-        print("No active cameras found.")
+        print("No active or no_feed cameras found.")
         return
 
-    audits = list(db.quality_audits.find({}))
-    if not audits:
-        print("No quality audits found.")
-        return
+    active_cameras = [c for c in cameras if c["status"] == "active"]
+    no_feed_cameras = [c for c in cameras if c["status"] == "no_feed"]
 
-    grouped = defaultdict(list)
-    for doc in audits:
-        grouped[group_key(doc["camera_id"], doc["capture_ts"])].append(doc)
+    cutoff = datetime.now(UTC) - timedelta(hours=LOOKBACK_HOURS)
+    audits = list(db.quality_audits.find({"capture_ts": {"$gte": cutoff}}))
 
-    capture_times = [doc["capture_ts"] for doc in audits]
-    start_ts = min(capture_times)
-    end_ts = max(capture_times)
+    if audits:
+        grouped = defaultdict(list)
+        for doc in audits:
+            grouped[group_key(doc["camera_id"], doc["capture_ts"])].append(doc)
 
-    expected_per_hour = build_expected_per_hour(cameras, start_ts, end_ts)
+        capture_times = [doc["capture_ts"] for doc in audits]
+        start_ts = min(capture_times)
+        end_ts = max(capture_times)
 
-    for gk, expected_count in expected_per_hour.items():
-        camera_id, date_str, hour = gk
-        docs = grouped.get(gk, [])
+        camera_ids_in_audits = {doc["camera_id"] for doc in audits}
+        recent_cameras = [c for c in active_cameras if c["camera_id"] in camera_ids_in_audits]
+        expected_per_hour = build_expected_per_hour(recent_cameras, start_ts, end_ts)
 
-        images_received = sum(
-            1 for d in docs
-            if (not d.get("is_missing_expected", False))
-            and d.get("raw_capture_success", False)
-        )
+        for gk, expected_count in expected_per_hour.items():
+            camera_id, date_str, hour = gk
+            docs = grouped.get(gk, [])
 
-        duplicate_count = sum(1 for d in docs if d.get("is_duplicate", False))
-        corrupted_count = sum(1 for d in docs if d.get("is_corrupted", False))
-        delayed_count = sum(1 for d in docs if d.get("is_delayed", False))
+            images_received = sum(
+                1 for d in docs
+                if (not d.get("is_missing_expected", False))
+                and d.get("raw_capture_success", False)
+            )
 
-        delay_values = [
-            d["delay_seconds"]
-            for d in docs
-            if d.get("delay_seconds") is not None
-        ]
-        avg_delay_sec = (
-            sum(delay_values) / len(delay_values)
-            if delay_values else None
-        )
+            duplicate_count = sum(1 for d in docs if d.get("is_duplicate", False))
+            corrupted_count = sum(1 for d in docs if d.get("is_corrupted", False))
+            delayed_count = sum(1 for d in docs if d.get("is_delayed", False))
 
-        completeness_rate = (
-            images_received / expected_count if expected_count > 0 else None
-        )
+            delay_values = [
+                d["delay_seconds"]
+                for d in docs
+                if d.get("delay_seconds") is not None
+            ]
+            avg_delay_sec = (
+                sum(delay_values) / len(delay_values)
+                if delay_values else None
+            )
 
-        summary_doc = {
-            "camera_id": camera_id,
-            "date": date_str,
-            "hour": hour,
-            "images_expected": expected_count,
-            "images_received": images_received,
-            "completeness_rate": completeness_rate,
-            "duplicate_count": duplicate_count,
-            "corrupted_count": corrupted_count,
-            "delayed_count": delayed_count,
-            "avg_delay_sec": avg_delay_sec,
-            "last_updated_ts": datetime.now(UTC),
-        }
+            completeness_rate = (
+                images_received / expected_count if expected_count > 0 else None
+            )
 
-        db.camera_hourly_summary.update_one(
-            {
+            summary_doc = {
                 "camera_id": camera_id,
                 "date": date_str,
                 "hour": hour,
-            },
+                "camera_status": "active",
+                "images_expected": expected_count,
+                "images_received": images_received,
+                "completeness_rate": completeness_rate,
+                "duplicate_count": duplicate_count,
+                "corrupted_count": corrupted_count,
+                "delayed_count": delayed_count,
+                "avg_delay_sec": avg_delay_sec,
+                "last_updated_ts": datetime.now(UTC),
+            }
+
+            db.camera_hourly_summary.update_one(
+                {"camera_id": camera_id, "date": date_str, "hour": hour},
+                {"$set": summary_doc},
+                upsert=True,
+            )
+
+            print(
+                f"[SUMMARY] {camera_id} {date_str} hour={hour} "
+                f"expected={expected_count} received={images_received} "
+                f"dup={duplicate_count} corrupt={corrupted_count} delayed={delayed_count}"
+            )
+    else:
+        print("No recent quality audits found.")
+
+    # Write no_feed summary entries for the current hour
+    now = datetime.now(UTC)
+    date_str = now.strftime("%Y-%m-%d")
+    hour = now.hour
+    for cam in no_feed_cameras:
+        summary_doc = {
+            "camera_id": cam["camera_id"],
+            "date": date_str,
+            "hour": hour,
+            "camera_status": "no_feed",
+            "images_expected": 0,
+            "images_received": 0,
+            "completeness_rate": None,
+            "duplicate_count": 0,
+            "corrupted_count": 0,
+            "delayed_count": 0,
+            "avg_delay_sec": None,
+            "last_updated_ts": now,
+        }
+        db.camera_hourly_summary.update_one(
+            {"camera_id": cam["camera_id"], "date": date_str, "hour": hour},
             {"$set": summary_doc},
             upsert=True,
         )
-
-        print(
-            f"[SUMMARY] {camera_id} {date_str} hour={hour} "
-            f"expected={expected_count} received={images_received} "
-            f"dup={duplicate_count} corrupt={corrupted_count} delayed={delayed_count}"
-        )
+        print(f"[NO_FEED] {cam['camera_id']} {date_str} hour={hour}")
 
     print("curate completed.")
+
+    # feature extraction backlog monitoring
+    cutoff = datetime.now(UTC) - timedelta(hours=2)
+    total = db.raw_captures.count_documents({"success": True, "capture_ts": {"$gte": cutoff}})
+    done = db.derived_features.count_documents({"capture_ts": {"$gte": cutoff}}) if "derived_features" in db.list_collection_names() else 0
+    backlog = total - done
+    level = "[WARN]" if backlog > 150 else "[OK]"
+    print(f"{level} feature_extract backlog (last 2h): {backlog}/{total}")
 
 if __name__ == "__main__":
     main()

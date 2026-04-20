@@ -1,3 +1,43 @@
+x-airflow-common:
+  &airflow-common
+  build: .
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: "your_fernet_key_here"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CELERY__WORKER_CONCURRENCY: "4"
+    MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/}
+    MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+    MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+    MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+    MINIO_BUCKET: ${MINIO_BUCKET:-traffic-raw}
+    INGEST_BATCH_COUNT: ${INGEST_BATCH_COUNT:-3}
+    CAMERAS_PER_BATCH: ${CAMERAS_PER_BATCH:-100}
+    PYTHONPATH: /opt/airflow
+  volumes:
+    &airflow-common-volumes
+    - ./app:/opt/airflow/app
+    - ./config:/opt/airflow/config
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    - ./mock_source:/opt/airflow/mock_source
+  depends_on:
+    &airflow-common-depends
+    postgres:
+      condition: service_started
+    redis:
+      condition: service_healthy
+    mongo:
+      condition: service_started
+    minio:
+      condition: service_started
+
 services:
   postgres:
     image: postgres:15
@@ -32,93 +72,79 @@ services:
     volumes:
       - minio_data:/data
 
+  redis:
+    image: redis:7-alpine
+    container_name: traffic-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   airflow-init:
-    build: .
+    <<: *airflow-common
     container_name: traffic-airflow-init
     depends_on:
-      - postgres
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__FERNET_KEY: "your_fernet_key_here"
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      MONGO_URI: mongodb://mongo:27017/
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET: traffic-raw
-      PYTHONPATH: /opt/airflow
-    volumes:
-      - ./app:/opt/airflow/app
-      - ./config:/opt/airflow/config
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-      - ./mock_source:/opt/airflow/mock_source
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    volumes: *airflow-common-volumes
     command: >
       bash -c "airflow db migrate &&
-      airflow users create --username admin --password admin --firstname admin --lastname user --role Admin --email admin@example.com"
+      airflow users create --username admin --password admin
+      --firstname admin --lastname user --role Admin --email admin@example.com"
 
   airflow-webserver:
-    build: .
+    <<: *airflow-common
     container_name: traffic-airflow-webserver
     depends_on:
-      - postgres
-      - airflow-init
-      - mongo
-      - minio
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__FERNET_KEY: "your_fernet_key_here"
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      MONGO_URI: mongodb://mongo:27017/
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET: traffic-raw
-      PYTHONPATH: /opt/airflow
+      <<: *airflow-common-depends
+      airflow-init:
+        condition: service_completed_successfully
+    volumes: *airflow-common-volumes
     ports:
       - "8080:8080"
-    volumes:
-      - ./app:/opt/airflow/app
-      - ./config:/opt/airflow/config
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-      - ./mock_source:/opt/airflow/mock_source
     command: webserver
 
   airflow-scheduler:
-    build: .
+    <<: *airflow-common
     container_name: traffic-airflow-scheduler
     depends_on:
-      - postgres
-      - airflow-init
+      <<: *airflow-common-depends
+      airflow-init:
+        condition: service_completed_successfully
+    volumes: *airflow-common-volumes
+    command: scheduler
+
+  api:
+    build: .
+    container_name: traffic-api
+    depends_on:
       - mongo
       - minio
     environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__FERNET_KEY: "your_fernet_key_here"
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      MONGO_URI: mongodb://mongo:27017/
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET: traffic-raw
-      PYTHONPATH: /opt/airflow
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-traffic-raw}
     volumes:
       - ./app:/opt/airflow/app
-      - ./config:/opt/airflow/config
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-      - ./mock_source:/opt/airflow/mock_source
-    command: scheduler
+    ports:
+      - "8000:8000"
+    entrypoint: ["python", "-m", "uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  airflow-worker:
+    <<: *airflow-common
+    depends_on:
+      <<: *airflow-common-depends
+      airflow-init:
+        condition: service_completed_successfully
+    volumes: *airflow-common-volumes
+    command: celery worker
 
 volumes:
   postgres_data:

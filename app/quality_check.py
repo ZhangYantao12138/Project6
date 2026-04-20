@@ -26,34 +26,32 @@ DB_NAME = "traffic_monitoring"
 #]
 
 DELAY_THRESHOLD_SECONDS = 120
-CAPTURE_TIME_CYCLE_MINUTES = 10
-def floor_ts_to_cycle(dt: datetime) -> datetime:
-    """
-    Floors the given datetime to the nearest previous cycle based on CAPTURE_TIME_CYCLE_MINUTES.
-    For example, if CAPTURE_TIME_CYCLE_MINUTES is 10:
-    - 14:07 -> 14:00
-    - 14:12 -> 14:10
-    - 14:20 -> 14:20
-    """
-    minute = (dt.minute // CAPTURE_TIME_CYCLE_MINUTES) * CAPTURE_TIME_CYCLE_MINUTES
+NORMAL_CYCLE_MINUTES = 10
+PRIORITY_CYCLE_MINUTES = 2
+
+def floor_ts_to_cycle(dt: datetime, cycle_minutes: int) -> datetime:
+    minute = (dt.minute // cycle_minutes) * cycle_minutes
     return dt.replace(minute=minute, second=0, microsecond=0)
 
-def get_expected_records(cameras):
-    now = floor_ts_to_cycle(datetime.now(UTC))
-    start = now - timedelta(minutes=CAPTURE_TIME_CYCLE_MINUTES)
+def get_expected_records(cameras, cycle_minutes: int):
+    now = floor_ts_to_cycle(datetime.now(UTC), cycle_minutes)
+    start = now - timedelta(minutes=cycle_minutes)
 
     expected = []
     current = start
-
     while current <= now:
         for cam in cameras:
             if cam.get("status") != "active":
+                continue
+            # Priority cycle only checks priority cameras;
+            # normal cycle checks all active cameras (incl. priority at 10-min slots)
+            if cycle_minutes == PRIORITY_CYCLE_MINUTES and not cam.get("priority"):
                 continue
             expected.append({
                 "camera_id": cam["camera_id"],
                 "capture_ts": current,
             })
-        current += timedelta(minutes=CAPTURE_TIME_CYCLE_MINUTES)
+        current += timedelta(minutes=cycle_minutes)
 
     return expected
 
@@ -225,16 +223,18 @@ def upsert_quality_audit(db, audit_doc):
     )
 
 
-def main():
+def main(cycle_minutes: int = NORMAL_CYCLE_MINUTES):
     db = init_mongo()
     minio_client = init_minio()
-    #cameras = load_cameras()
     cameras = load_cameras_from_mongo(db)
 
-    expected_records = get_expected_records(cameras)
-    #raw_map, raw_docs = load_raw_capture_map(db)
+    expected_records = get_expected_records(cameras, cycle_minutes)
 
-    window_start = min(item["capture_ts"] for item in expected_records) - timedelta(minutes=CAPTURE_TIME_CYCLE_MINUTES)
+    if not expected_records:
+        print("No expected records for this cycle — nothing to audit.")
+        return
+
+    window_start = min(item["capture_ts"] for item in expected_records) - timedelta(minutes=cycle_minutes)
     window_end = max(item["capture_ts"] for item in expected_records)
 
     raw_map, raw_docs = load_raw_capture_map(
