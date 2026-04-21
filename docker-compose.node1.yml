@@ -25,4 +25,6 @@ services:
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
     hostname: "10.10.8.11"
+    ports:
+      - "8793:8793"
     command: celery worker --queues ingest -c 4

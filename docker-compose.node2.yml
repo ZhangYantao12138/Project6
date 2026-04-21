@@ -23,6 +23,8 @@ services:
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
     hostname: "10.10.8.12"
+    ports:
+      - "8793:8793"
     command: celery worker --queues processing -c 2
 
   api:
