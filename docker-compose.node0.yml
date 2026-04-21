@@ -43,6 +43,19 @@ services:
     volumes:
       - minio_data:/data
 
+  minio-init:
+    image: minio/mc:latest
+    container_name: traffic-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 2; done;
+      mc mb --ignore-existing local/traffic-raw;
+      echo 'Bucket traffic-raw ready.'
+      "
+    restart: on-failure
+
   airflow-init:
     build: .
     container_name: traffic-airflow-init
