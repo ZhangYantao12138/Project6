@@ -22,6 +22,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
+    hostname: "10.10.8.12"
     command: celery worker --queues processing -c 2
 
   api:
