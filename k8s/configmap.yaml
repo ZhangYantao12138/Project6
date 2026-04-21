@@ -1,0 +1,22 @@
+# Author: <your name>
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-config
+  namespace: traffic
+data:
+  AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+  AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+  AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres:5432/airflow
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+  AIRFLOW__CELERY__WORKER_CONCURRENCY: "4"
+  MONGO_URI: mongodb://mongo:27017/
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: minioadmin
+  MINIO_SECRET_KEY: minioadmin
+  MINIO_BUCKET: traffic-raw
+  INGEST_BATCH_COUNT: "3"
+  CAMERAS_PER_BATCH: "100"
+  PYTHONPATH: /opt/airflow

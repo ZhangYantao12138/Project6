@@ -1,0 +1,29 @@
+# Author: <your name>
+# Runs on the node labeled: kubectl label nodes <node1> traffic-role=ingest
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-worker-ingest
+  namespace: traffic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-worker-ingest
+  template:
+    metadata:
+      labels:
+        app: airflow-worker-ingest
+    spec:
+      nodeSelector:
+        traffic-role: ingest
+      containers:
+        - name: airflow-worker-ingest
+          image: traffic-pipeline:latest
+          imagePullPolicy: IfNotPresent
+          args: ["celery", "worker", "--queues", "ingest", "-c", "4"]
+          envFrom:
+            - configMapRef:
+                name: airflow-config
+            - secretRef:
+                name: airflow-secret

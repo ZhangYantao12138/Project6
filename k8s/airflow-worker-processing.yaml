@@ -1,0 +1,32 @@
+# Author: <your name>
+# Runs on the node labeled: kubectl label nodes <node2> traffic-role=processing
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-worker-processing
+  namespace: traffic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-worker-processing
+  template:
+    metadata:
+      labels:
+        app: airflow-worker-processing
+    spec:
+      nodeSelector:
+        traffic-role: processing
+      containers:
+        - name: airflow-worker-processing
+          image: traffic-pipeline:latest
+          imagePullPolicy: IfNotPresent
+          args: ["celery", "worker", "--queues", "processing", "-c", "2"]
+          envFrom:
+            - configMapRef:
+                name: airflow-config
+            - secretRef:
+                name: airflow-secret
+          env:
+            - name: AIRFLOW__CELERY__WORKER_CONCURRENCY
+              value: "2"

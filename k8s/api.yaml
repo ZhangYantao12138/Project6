@@ -1,0 +1,52 @@
+# Author: <your name>
+# Runs on the node labeled: kubectl label nodes <node2> traffic-role=processing
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: traffic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      nodeSelector:
+        traffic-role: processing
+      containers:
+        - name: api
+          image: traffic-pipeline:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+          env:
+            - name: MONGO_URI
+              value: mongodb://mongo:27017/
+            - name: MINIO_ENDPOINT
+              value: minio:9000
+            - name: MINIO_ACCESS_KEY
+              value: minioadmin
+            - name: MINIO_SECRET_KEY
+              value: minioadmin
+            - name: MINIO_BUCKET
+              value: traffic-raw
+            - name: PYTHONPATH
+              value: /opt/airflow
+          ports:
+            - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: traffic
+spec:
+  type: NodePort
+  selector:
+    app: api
+  ports:
+    - port: 8000
+      nodePort: 30000

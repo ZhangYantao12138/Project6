@@ -1,0 +1,42 @@
+# Author: <your name>
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airflow-init
+  namespace: traffic
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:15
+          command:
+            - sh
+            - -c
+            - until pg_isready -h postgres -U airflow; do echo "waiting for postgres..."; sleep 3; done
+        - name: wait-for-redis
+          image: redis:7-alpine
+          command:
+            - sh
+            - -c
+            - until redis-cli -h redis ping; do echo "waiting for redis..."; sleep 3; done
+      containers:
+        - name: airflow-init
+          image: traffic-pipeline:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: airflow-config
+            - secretRef:
+                name: airflow-secret
+          command:
+            - bash
+            - -c
+            - |
+              airflow db migrate
+              airflow users create \
+                --username admin --password admin \
+                --firstname admin --lastname user \
+                --role Admin --email admin@example.com
